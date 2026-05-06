@@ -1,16 +1,24 @@
-# MMT Clone — Student Prompts & Dependency Guide
+# MMT Clone — Student Prompts & Dependency Guide (Clerk Auth)
 
-> Tech Stack: React.js (Vite) · Node.js · Express.js · MongoDB Atlas
+> Tech Stack: React.js (Vite) · Node.js · Express.js · MongoDB Atlas · Clerk (Authentication)
+
+---
+
+## What Changed from JWT Version
+
+- Student 4's entire job changes — no signup/login API to build.
+  Instead, Student 4 sets up Clerk on the frontend and protects backend routes.
+- Student 3 reads the Clerk session token instead of a localStorage JWT.
+- Student 6 verifies the Clerk session token on the backend instead of using authMiddleware.
+- Students 1, 2, and 5 are largely unchanged.
 
 ---
 
 ## Recommended Build Order
 
 ```
-Student 4 → Student 5 → Student 1 → Student 2 → Student 3 + Student 6 (parallel) → Integration
+Student 4 (Clerk setup) → Student 5 → Student 1 → Student 2 → Student 3 + Student 6 (parallel) → Integration
 ```
-
-Students **4 and 5 are fully independent** and should start first. Everyone else has some dependency on their work.
 
 ---
 
@@ -18,12 +26,12 @@ Students **4 and 5 are fully independent** and should start first. Everyone else
 
 | Student | Role | Depends On |
 |---------|------|------------|
-| S1 | Frontend – Search Page | S5 (flights API shape) |
+| S1 | Frontend – Search Page | S5 (flights API shape), S4 (Clerk installed & ClerkProvider wrapping app) |
 | S2 | Frontend – Flights List | S1 (router state with flights) |
-| S3 | Frontend – Booking Page | S2 (selected flight), S4 (JWT token), S6 (booking API) |
-| S4 | Backend – Auth APIs | Nobody — start immediately |
+| S3 | Frontend – Booking Page | S2 (selected flight), S4 (Clerk useAuth hook), S6 (booking API) |
+| S4 | Frontend+Backend – Clerk Setup | Nobody — start immediately |
 | S5 | Backend – Flights API | Nobody — start immediately |
-| S6 | Backend – Booking API | S4 (authMiddleware) |
+| S6 | Backend – Booking API | S4 (Clerk backend SDK to verify session token) |
 
 ---
 
@@ -31,19 +39,20 @@ Students **4 and 5 are fully independent** and should start first. Everyone else
 
 **Files:** `src/pages/SearchPage.jsx` · `src/components/SearchForm.jsx` · `src/api/flights.js`
 
-**Depends on:** Student 5 for `GET /flights` API response shape
+**Depends on:** Student 4 (ClerkProvider must wrap the app before useAuth works) · Student 5 (GET /flights API shape)
 
 ### Prompt
 
 ```
 I am Student 1 on an MMT Clone project. The full file structure is already created.
+The project uses Clerk for authentication (already set up by Student 4).
 
 My files to build:
 - src/pages/SearchPage.jsx
 - src/components/SearchForm.jsx
 - src/api/flights.js
 
-Tech: React.js (Vite), axios
+Tech: React.js (Vite), axios, Clerk
 
 Task: Build the flight search homepage.
 
@@ -56,6 +65,9 @@ Requirements:
    - Use useState for all 3 values
 
 2. SearchPage.jsx — imports and renders SearchForm
+   - Import useAuth from "@clerk/clerk-react"
+   - If user is not signed in, show a message: "Please sign in to search flights"
+     Use: const { isSignedIn } = useAuth()
    - On form submit, call the flights API
    - Use React Router's useNavigate to pass search results to /flights page via state
    - Show a loading state while fetching
@@ -63,6 +75,7 @@ Requirements:
 3. src/api/flights.js — axios function:
    export async function searchFlights({ from, to, date }) {
      // GET request to http://localhost:5000/api/flights?from=...&to=...&date=...
+     // This route is public — no auth token needed
    }
 
 Dependency note: Student 5 is building GET /flights backend. Until that is ready,
@@ -85,6 +98,7 @@ Show complete working code for all 3 files.
 
 ```
 I am Student 2 on an MMT Clone project. The full file structure is already created.
+The project uses Clerk for authentication (already set up by Student 4).
 
 My files to build:
 - src/pages/FlightsPage.jsx
@@ -124,19 +138,20 @@ Show complete working code for both files.
 
 **Files:** `src/pages/BookingPage.jsx` · `src/components/BookingForm.jsx` · `src/api/booking.js`
 
-**Depends on:** Student 2 (selected flight via router state) · Student 4 (JWT token in localStorage) · Student 6 (POST /bookings API)
+**Depends on:** Student 2 (selected flight via router state) · Student 4 (Clerk useAuth hook to get session token) · Student 6 (POST /bookings API)
 
 ### Prompt
 
 ```
 I am Student 3 on an MMT Clone project. The full file structure is already created.
+The project uses Clerk for authentication (already set up by Student 4).
 
 My files to build:
 - src/pages/BookingPage.jsx
 - src/components/BookingForm.jsx
 - src/api/booking.js
 
-Tech: React.js (Vite), axios, React Router
+Tech: React.js (Vite), axios, React Router, Clerk
 
 Task: Build the booking confirmation page.
 
@@ -149,23 +164,29 @@ Requirements:
    - Accepts onSubmit prop function
 
 2. BookingPage.jsx:
+   - Import useAuth from "@clerk/clerk-react"
    - Use useLocation() to read the selected flight passed by Student 2:
      const { flight } = useLocation().state || {}
    - Show selected flight details at top (airline, time, price)
    - Render BookingForm below
-   - On form submit, call the booking API with:
-     { flightId: flight.flightId, passengerName, passengerAge, userId: from localStorage }
+   - On form submit:
+     * Get the Clerk session token:
+       const { getToken } = useAuth()
+       const token = await getToken()
+     * Call the booking API passing the token:
+       await createBooking({ flightId: flight.flightId, passengerName, passengerAge }, token)
    - On success, show "Booking Confirmed!" message
 
 3. src/api/booking.js — axios function:
-   export async function createBooking(data) {
-     // POST to http://localhost:5000/api/bookings
-     // Send JWT token in headers: Authorization: Bearer <token from localStorage>
+   export async function createBooking(data, token) {
+     return axios.post("http://localhost:5000/api/bookings", data, {
+       headers: { Authorization: `Bearer ${token}` }
+     })
    }
 
 Dependency note:
 - Student 6 is building POST /bookings. Until ready, mock the response: return { success: true }
-- Student 4's login saves JWT to localStorage as "token". Read it with localStorage.getItem("token")
+- The token comes from Clerk's getToken() — no localStorage needed.
 
 Use basic CSS. No UI libraries.
 Show complete working code for all 3 files.
@@ -173,61 +194,98 @@ Show complete working code for all 3 files.
 
 ---
 
-## Student 4 — Backend: Auth APIs
+## Student 4 — Clerk Setup (Frontend + Backend)
 
-**Files:** `backend/routes/authRoutes.js` · `backend/controllers/authController.js` · `backend/models/User.js`
+**Files:** `src/main.jsx` · `src/pages/LoginPage.jsx` · `src/pages/SignupPage.jsx` · `backend/middleware/clerkMiddleware.js` · `src/App.jsx` (routes)
 
 **Depends on:** Nobody — start immediately
 
-> Student 3 and Student 6 both depend on your JWT token and authMiddleware. Prioritise finishing this early.
+> Everyone depends on you. Set up Clerk first so the rest of the team can use useAuth() and protected routes.
 
 ### Prompt
 
 ```
 I am Student 4 on an MMT Clone project. The full file structure is already created.
+We are using Clerk for authentication instead of building custom JWT auth.
+
+My job is to set up Clerk across the full stack so all other students can use it.
 
 My files to build:
-- backend/routes/authRoutes.js
-- backend/controllers/authController.js
-- backend/models/User.js
+- src/main.jsx (wrap app with ClerkProvider)
+- src/pages/LoginPage.jsx
+- src/pages/SignupPage.jsx
+- src/App.jsx (define all routes with protected route logic)
+- backend/middleware/clerkMiddleware.js
 
-Tech: Node.js, Express.js, MongoDB (Mongoose), bcryptjs, jsonwebtoken
+Tech: React.js (Vite), Clerk, Node.js, Express.js
 
-Task: Build signup and login APIs.
+FRONTEND SETUP:
 
-Requirements:
-1. models/User.js — Mongoose schema:
-   { name: String, email: String (unique), password: String (hashed) }
+1. Install Clerk:
+   npm install @clerk/clerk-react
 
-2. authController.js:
-   - signup(req, res):
-     * Receive { name, email, password }
-     * Hash password using bcryptjs
-     * Save new User to MongoDB
-     * Return success message
+2. Get your Clerk Publishable Key from https://dashboard.clerk.com
+   Add to frontend .env:
+   VITE_CLERK_PUBLISHABLE_KEY=pk_test_xxxxxxxx
 
-   - login(req, res):
-     * Receive { email, password }
-     * Find user by email
-     * Compare password with bcrypt
-     * If valid, sign a JWT with { userId: user._id } and JWT_SECRET from .env
-     * Return { token } in response
+3. src/main.jsx:
+   - Wrap <App /> with <ClerkProvider publishableKey={import.meta.env.VITE_CLERK_PUBLISHABLE_KEY}>
 
-3. authRoutes.js:
-   - POST /api/auth/signup → authController.signup
-   - POST /api/auth/login  → authController.login
-   - Mount in server.js as: app.use('/api/auth', authRoutes)
+4. src/pages/LoginPage.jsx:
+   - Use Clerk's prebuilt component:
+     import { SignIn } from "@clerk/clerk-react"
+     export default function LoginPage() { return <SignIn /> }
 
-Also create middleware/authMiddleware.js:
-   - Reads Authorization header: "Bearer <token>"
-   - Verifies token using JWT_SECRET
-   - Sets req.user = { userId } and calls next()
-   - Returns 401 if token missing or invalid
+5. src/pages/SignupPage.jsx:
+   - Use Clerk's prebuilt component:
+     import { SignUp } from "@clerk/clerk-react"
+     export default function SignupPage() { return <SignUp /> }
 
-The .env already has: PORT, MONGO_URI, JWT_SECRET
+6. src/App.jsx — set up React Router routes:
+   Routes needed:
+   - / → SearchPage (protected — only signed-in users)
+   - /flights → FlightsPage (protected)
+   - /booking → BookingPage (protected)
+   - /login → LoginPage (public)
+   - /signup → SignupPage (public)
 
-Install needed: npm install bcryptjs jsonwebtoken
-Show complete working code for all files including authMiddleware.js.
+   For protected routes, use Clerk's <SignedIn> and <SignedOut>:
+   import { SignedIn, SignedOut, RedirectToSignIn } from "@clerk/clerk-react"
+
+   Wrap each protected route like this:
+   <SignedIn><SearchPage /></SignedIn>
+   <SignedOut><RedirectToSignIn /></SignedOut>
+
+   Also add a Navbar with:
+   - <UserButton /> from Clerk (shows avatar + sign out)
+   - <SignedOut> show Sign In link
+
+BACKEND SETUP:
+
+7. Install Clerk backend SDK:
+   npm install @clerk/express
+
+8. Add to backend .env:
+   CLERK_SECRET_KEY=sk_test_xxxxxxxx
+   (Get this from Clerk dashboard → API Keys)
+
+9. backend/middleware/clerkMiddleware.js:
+   import { clerkMiddleware, getAuth } from "@clerk/express"
+
+   export const requireAuth = (req, res, next) => {
+     const { userId } = getAuth(req)
+     if (!userId) return res.status(401).json({ error: "Unauthorized" })
+     req.userId = userId
+     next()
+   }
+
+   export { clerkMiddleware }
+
+10. In backend/server.js, add at the top (before all routes):
+    import { clerkMiddleware } from "./middleware/clerkMiddleware.js"
+    app.use(clerkMiddleware())
+
+Show complete working code for all files.
 ```
 
 ---
@@ -238,12 +296,13 @@ Show complete working code for all files including authMiddleware.js.
 
 **Depends on:** Nobody — start immediately
 
-> Students 1 and 2 depend on your API response shape. Define it clearly and share with the team early.
+> Students 1 and 2 depend on your API response shape. This is a public route — no Clerk auth needed.
 
 ### Prompt
 
 ```
 I am Student 5 on an MMT Clone project. The full file structure is already created.
+The project uses Clerk for authentication, but the flights API is a public route (no auth needed).
 
 My files to build:
 - backend/routes/flightRoutes.js
@@ -268,7 +327,7 @@ Requirements:
      * Add 5-6 hardcoded sample flights to the DB for testing
 
 3. flightRoutes.js:
-   - GET /api/flights → flightController.getFlights
+   - GET /api/flights → flightController.getFlights (NO auth middleware — public route)
    - Mount in server.js as: app.use('/api/flights', flightRoutes)
 
 IMPORTANT — Response shape (Students 1 and 2 depend on this):
@@ -288,49 +347,52 @@ Show complete working code for all 3 files.
 
 **Files:** `backend/routes/bookingRoutes.js` · `backend/controllers/bookingController.js` · `backend/models/Booking.js`
 
-**Depends on:** Student 4 (authMiddleware for JWT verification) · Student 5 (flightId reference from Flight model)
+**Depends on:** Student 4 (clerkMiddleware + requireAuth from clerkMiddleware.js) · Student 5 (flightId reference)
 
 ### Prompt
 
 ```
 I am Student 6 on an MMT Clone project. The full file structure is already created.
+The project uses Clerk for authentication. The booking route must be protected using Clerk.
 
 My files to build:
 - backend/routes/bookingRoutes.js
 - backend/controllers/bookingController.js
 - backend/models/Booking.js
 
-Tech: Node.js, Express.js, MongoDB (Mongoose)
+Tech: Node.js, Express.js, MongoDB (Mongoose), Clerk backend SDK
 
 Task: Build the flight booking API.
 
 Requirements:
 1. models/Booking.js — Mongoose schema:
    {
-     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+     clerkUserId: { type: String, required: true },
      flightId: { type: String },
      passengerName: String,
      passengerAge: Number,
      bookedAt: { type: Date, default: Date.now }
    }
+   Note: We store clerkUserId (a string like "user_2abc...") instead of a MongoDB ObjectId
+   because Clerk manages users — there is no User collection in our DB.
 
 2. bookingController.js:
    - createBooking(req, res):
      * Receive { flightId, passengerName, passengerAge } from req.body
-     * Get userId from req.user.userId (set by authMiddleware after JWT verification)
+     * Get clerkUserId from req.userId (set by Student 4's requireAuth middleware)
      * Save new Booking document to MongoDB
      * Return { message: "Booking confirmed", booking }
 
 3. bookingRoutes.js:
-   - POST /api/bookings → authMiddleware → bookingController.createBooking
-   - Route must be protected (JWT required)
+   - Import requireAuth from "../middleware/clerkMiddleware.js"
+   - POST /api/bookings → requireAuth → bookingController.createBooking
    - Mount in server.js as: app.use('/api/bookings', bookingRoutes)
 
 Dependency note:
-- Student 4 is building middleware/authMiddleware.js. It verifies the JWT and sets req.user = { userId }.
-  Import it as: const authMiddleware = require('../middleware/authMiddleware')
-  Until Student 4 finishes, use this temporary mock middleware:
-    const authMiddleware = (req, res, next) => { req.user = { userId: "mockUserId123" }; next(); }
+- Student 4 is building backend/middleware/clerkMiddleware.js
+  It exports requireAuth which sets req.userId = clerkUserId
+  Until Student 4 finishes, use this temporary mock:
+    const requireAuth = (req, res, next) => { req.userId = "user_mock123"; next(); }
 
 Show complete working code for all 3 files.
 ```
@@ -341,14 +403,16 @@ Show complete working code for all 3 files.
 
 Once all parts are built, do this together as a team:
 
-- [ ] S4: Confirm `POST /api/auth/signup` and `POST /api/auth/login` work in Postman
-- [ ] S5: Confirm `GET /api/flights?from=Mumbai&to=Delhi&date=2025-06-01` returns flight array
-- [ ] S1: Swap mock in `flights.js` with real axios call to S5's API
+- [ ] S4: Confirm ClerkProvider is wrapping the app and SignIn/SignUp pages load correctly
+- [ ] S4: Confirm clerkMiddleware() is applied in server.js before all routes
+- [ ] S5: Confirm GET /api/flights?from=Mumbai&to=Delhi&date=2025-06-01 returns flight array
+- [ ] S1: Swap mock in flights.js with real axios call to S5's API
+- [ ] S1: Confirm unauthenticated users are redirected to /login
 - [ ] S2: Confirm flight cards render with real data from S1
-- [ ] S6: Confirm `POST /api/bookings` works with a real JWT from S4's login
-- [ ] S3: Swap mock in `booking.js` with real axios call to S6's API
-- [ ] All: Test full flow — Signup → Login → Search → Flights → Book → Confirmed
+- [ ] S6: Confirm POST /api/bookings returns 401 without a Clerk token
+- [ ] S3: Get Clerk token via getToken() and confirm booking saves to MongoDB
+- [ ] All: Test full flow — Sign Up → Sign In → Search → Flights → Book → Confirmed
 
 ---
 
-*Generated for MMT Clone · Group of 6 · Skill Turtle*
+*Generated for MMT Clone · Group of 6 · Skill Turtle · Clerk Auth Edition*
